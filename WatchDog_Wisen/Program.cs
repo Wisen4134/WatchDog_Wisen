@@ -12,6 +12,28 @@ namespace WatchDog_Wisen
 {
     internal class Program
     {
+
+        static void Main(string[] args)
+        {
+            bool processCreate;
+
+            // 新增互斥鎖,防止重複開啟
+            mMutex = new Mutex(true, "MyApplication", out processCreate);
+
+            if (processCreate)
+            {
+                AppDomain.CurrentDomain.ProcessExit += new EventHandler(OnProcessExit);
+
+                readSettingJson();
+
+                int watchInterval = Int32.Parse(_sWatchInterval);
+
+                ProcessLog processLog = new ProcessLog();
+
+                Program app = new Program(_sAppName, watchInterval, processLog);
+            }
+        }
+
         public static string _sAppName = "";
 
         public static string _sAppPath = "";
@@ -42,30 +64,13 @@ namespace WatchDog_Wisen
 
         private static Mutex mMutex;
 
+        private ProcessLog log;
 
-        static void Main(string[] args)
-        {
-            bool processCreate;
-
-            // 新增互斥鎖,防止重複開啟
-            mMutex = new Mutex(true, "MyApplication", out processCreate);
-
-            if (processCreate)
-            {
-                AppDomain.CurrentDomain.ProcessExit += new EventHandler(OnProcessExit);
-
-                readSettingJson();
-
-                int watchInterval = Int32.Parse(_sWatchInterval);
-
-                Program app = new Program(_sAppName, watchInterval);
-            }
-        }
-
-        public Program(string appname, int wdinterval)
+        public Program(string appname, int wdinterval, ProcessLog mLog)
         {
             this.mAppName = appname;
             this.mWdInterval = wdinterval;
+            this.log = mLog;
 
             try
             {
@@ -76,7 +81,7 @@ namespace WatchDog_Wisen
             }
             catch (Exception e)
             {
-                Console.WriteLine("wdThread error:" + e.StackTrace);
+                log.Log("Error", $"建立主執行緒時發生錯誤：{e.StackTrace}",e);
                 
             }
         }
@@ -125,21 +130,21 @@ namespace WatchDog_Wisen
                                 {
                                     foreach (var process in p)
                                     {
-                                        
+                                        log.Log("Process", $"{process.ProcessName}開始執行！", null); ;
                                     }
                                 }
                                 catch (Exception e)
                                 {
                                     foreach (var process in p)
                                     {
-                                        
+                                        log.Log("Error",$"{process.ProcessName}是否已經關閉：{process.HasExited}",e);
                                     }
                                 }
 
                             }
                             else
                             {
-                                Console.WriteLine("Dog want watch the app which should be monited can`t found at" + appwatchpath);
+                                log.Log("Path_Error", $"監測路徑設定有誤,找不到{appwatchpath}", null);
                             }
                         }
 
@@ -163,7 +168,7 @@ namespace WatchDog_Wisen
                                     }
                                     catch (Exception e)
                                     {
-                                        Console.WriteLine("kill app error:" + e.Message);
+                                        log.Log("Error",$"關閉程序時發生錯誤：{e.Message}", e);
                                     }
                                 }
 
@@ -180,13 +185,14 @@ namespace WatchDog_Wisen
                                     if (File.Exists(_sFood))
                                     {
                                         File.Delete(_sFood);
-                                        Console.WriteLine($"Food is been ate!");
+                                        log.Log("Process",$"成功刪除food！", null);
+                                        
                                     }
                                     //continue;
                                 }
                                 catch (Exception e)
                                 {
-                                    Console.WriteLine("FOOD Delete error :" + e.Message);
+                                    log.Log("Error",$"food刪除過程有誤,錯誤訊息：{e.Message}", e);
                                 }
                             }
                         }
@@ -196,7 +202,8 @@ namespace WatchDog_Wisen
                     }
                     else
                     {
-                        Console.WriteLine("Dog is rest because dog is rest or App using DataBase! ");
+                        log.Log("Rest_Error", $"此程式休息中,可能因為【rest】檔案存在 or 【dbuse】存在!", null);
+                        
                     }
                     Thread.Sleep(mWdInterval);
                 }
@@ -212,22 +219,17 @@ namespace WatchDog_Wisen
 
                 if (p.Length == 0)
                 {
-
-                    
                     return false;
-
                 }
                 else
                 {
-                    
                     return true;
                 }
 
             }
             catch (Exception e)
             {
-                Console.WriteLine("appexist error:" + e.Message);
-                
+                log.Log("Error", $"判斷程序是否存在時發生錯誤,錯誤訊息：{e.Message}", e);
                 return true;
             }
         }
@@ -247,16 +249,21 @@ namespace WatchDog_Wisen
         }
         private void OnChanged(object sender, FileSystemEventArgs e)
         {
-            mFileWatcher.EnableRaisingEvents = false; //用這個來避免一次改變 重複觸發兩次此事件的情況
-            Console.WriteLine($"檔案變更：{e.FullPath} \t {e.ChangeType}");// 這裡擺重啟程式的方法
-            mIniChangeIndex = true; //藉由此index判斷程式是否需要重啟，如果ini有改變 = True ; 沒改變 = False
-            Thread.Sleep(10); //要停頓一下才不會重複觸發
+            // -- 避免一次改變 卻造成重複觸發兩次此事件的情況 --
+            mFileWatcher.EnableRaisingEvents = false;
+
+            // -- 這裡擺重啟程式的方法 --
+            log.Log("FileChange", $"檔案變更：{e.FullPath} \t {e.ChangeType}", null);
+            // -- 藉由此index判斷程式是否需要重啟，如果ini有改變 = True ; 沒改變 = False --
+            mIniChangeIndex = true;
+            // -- 要停頓一下才不會重複觸發 --
+            Thread.Sleep(10); 
             mFileWatcher.EnableRaisingEvents = true;
             
         }
         private void OnRenamed(object sender, RenamedEventArgs e)
         {
-            Console.WriteLine($"檔案改變：{e.OldFullPath} \t 變為{e.FullPath}");
+            log.Log("FileChange", $"檔案改變：{e.OldFullPath} \t 變為{e.FullPath}", null);
         }
         private static void readSettingJson()
         {
@@ -292,6 +299,7 @@ namespace WatchDog_Wisen
         private static void OnProcessExit(object sender, EventArgs e)
         {
             
+            Console.WriteLine($"此程式關閉。EventArgs：{e}");
         }
     }
 }
